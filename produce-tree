@@ -1,0 +1,25 @@
+#!/bin/bash
+set -e
+
+if [ -z $1 ]; then
+	# get images from https://ci.android.com
+	echo "Usage: $0 <aosp ci image> [output dir]"
+	exit 1
+fi
+if [ -z $2 ]; then OUTPUT="."; else OUTPUT="$2"; fi
+
+WORKDIR=$(mktemp -dt 'pw.wrapper.XXXXXX')
+function onexit {
+	rm -rf "${WORKDIR}"
+}
+trap onexit EXIT
+
+mkdir -p "${OUTPUT}"
+
+unzip -od "${WORKDIR}" "$1" system.img
+e2cp "${WORKDIR}/system.img:system/apex/com.android.runtime.apex" "${WORKDIR}"
+unzip -od "${WORKDIR}" "${WORKDIR}/com.android.runtime.apex" apex_payload.img
+mkdir -p "${OUTPUT}/lib64"
+e2cp "${WORKDIR}/apex_payload.img:bin/linker64" "${OUTPUT}"
+chmod +x "${OUTPUT}/linker64"
+LANG=C e2ls -l "${WORKDIR}/apex_payload.img:lib64/bionic" | awk '{print $8}' | xargs -I '{}' e2cp "${WORKDIR}/apex_payload.img:lib64/bionic/{}" "${OUTPUT}/lib64/"

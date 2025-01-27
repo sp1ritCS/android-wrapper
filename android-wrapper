@@ -1,0 +1,114 @@
+#!/usr/bin/perl
+
+# Pixiewood - GTK Android Builder
+# Copyright (C) 2025  Florian "sp1rit" <sp1rit@disroot.org>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+use strict;
+use warnings;
+use Cwd qw(abs_path);
+use File::Basename qw(fileparse);
+use File::Spec::Functions qw(catfile);
+use File::Temp qw(tempfile);
+use Getopt::Long qw(GetOptions);
+use IPC::Run qw(run);
+use List::Util qw(max reduce);
+use Set::Scalar;
+
+Getopt::Long::Configure("default", "require_order", "bundling");
+
+my $valid_arches = Set::Scalar->new("aarch64", "x86_64");
+my (undef, $dir) = fileparse(abs_path(__FILE__));
+
+my $toolchain;
+my $sdkver;
+my $help = 0;
+
+sub usage {
+	my ($error) = @_;
+	print STDERR "Error: $error\n" if $error;
+
+	print << "EOF";
+Usage: $0 [options] <arch> <command [arg]...>
+
+Options:
+  -t, --toolchain <DIR>   Install location of the Android NDK (typically within the SDK)
+  -s, --sdkver <VERSION>  Version of the Android SDK to load libraries from
+  -h, --help              Display this help message
+
+Supported architectures: ${valid_arches}
+EOF
+	exit 1 if $error;
+	exit 0;
+}
+
+GetOptions(
+	"toolchain|t=s" => \$toolchain,
+	"sdkver|s=s" => \$sdkver,
+	"help|h" => \$help,
+) or usage("Incorrect usage of command line options");
+
+usage() if $help;
+
+unless (defined $toolchain) {
+	use Glib::Object::Introspection;
+	Glib::Object::Introspection->setup(basename => 'AppStream', version => '1.0', package => 'As');
+	usage 'Requires --toolchain or ANDROID_HOME to be set' unless defined $ENV{ANDROID_HOME};
+	$toolchain = do {
+		opendir(my $dir, catfile($ENV{ANDROID_HOME}, 'ndk')) or die "Failed to open NDK toolchain dir: $!";
+		my $newest = reduce { As::vercmp ($a, $b, "none") > 0 ? $a : $b } grep { !/^\./ } readdir($dir);
+		closedir($dir);
+		defined $newest ? catfile $ENV{ANDROID_HOME}, "ndk", $newest : undef
+	} unless defined $toolchain;
+	usage("Unable to detect Android NDK (Toolchain), try specifing it") unless defined $toolchain;
+}
+
+my $arch = shift or usage("Incorrect usage of command line options");
+usage("Unknown arch: ${arch}") unless $valid_arches->contains($arch);
+
+my $bin = shift or usage("Unexpected usage of command line options");
+$bin = abs_path $bin;
+my (undef, $bindir) = fileparse $bin;
+
+my $name = "ld.config.txt";
+my ($fh, $cfgpath) = tempfile "ldXXXXXX", SUFFIX => ".config.txt", TMPDIR => 1, UNLINK => 1;
+
+my $libdir = abs_path catfile $dir, $arch, '${LIB}';
+my $ndklibs = abs_path catfile $toolchain, 'toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib', "${arch}-linux-android";
+die 'Failed to find NDK libdir, ensure toolchain is correctly set' unless defined $ndklibs;
+unless (defined $sdkver) {
+	opendir(my $dir, $ndklibs) or die "Failed to open NDK sysroot libdir for ${arch}: $!";
+	$sdkver = max grep { /^\d+$/ } readdir($dir);
+	closedir($dir);
+	usage("Failed to pick SDK version, try specifing it") unless defined $sdkver;
+}
+my $ndkvlibs = abs_path catfile $ndklibs, $sdkver;
+print $fh (<< "EOF");
+dir.wrapper=${bindir}
+
+[wrapper]
+namespace.default.search.paths = ${libdir}
+namespace.default.search.paths += ${ndklibs}
+namespace.default.search.paths += ${ndkvlibs}
+EOF
+
+# we fork+exec+waitpid instead of exec directly that the tempfile can be deleted afterwards
+my $pid = fork;
+if ($pid == 0) {
+	$ENV{LD_CONFIG_FILE} = $cfgpath;
+	exec("qemu-${arch}", catfile($dir, $arch, 'linker64'), $bin, @ARGV) or die('Failed to execute qemu, ensure you have it installed');
+}
+waitpid $pid, 0;
+exit $? >> 8;
