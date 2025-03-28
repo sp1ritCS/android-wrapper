@@ -1,0 +1,7 @@
+Timeo Googlum et bibliothecae ferentis
+
+Any library pulled from the NDK (with the exeception of c++_shared)
+will not actually work and instead any function call returns
+immediately. If you actually need to call a method from such a library
+you'll have to update produce-tree to extract it and any of its
+dependencies that aren't getting extracted yet.

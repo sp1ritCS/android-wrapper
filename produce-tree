@@ -17,9 +17,24 @@ trap onexit EXIT
 mkdir -p "${OUTPUT}"
 
 unzip -od "${WORKDIR}" "$1" system.img
+mkdir -p "${OUTPUT}/lib64"
+
+e2cp "${WORKDIR}/system.img:system/lib64/liblog.so" "${OUTPUT}/lib64/"
+e2cp "${WORKDIR}/system.img:system/lib64/libz.so" "${OUTPUT}/lib64/"
+
+e2cp "${WORKDIR}/system.img:system/apex/com.android.i18n.apex" "${WORKDIR}"
+unzip -od "${WORKDIR}" "${WORKDIR}/com.android.i18n.apex" apex_payload.img
+e2cp "${WORKDIR}/apex_payload.img:lib64/libicu.so" "${OUTPUT}/lib64/"
+e2cp "${WORKDIR}/apex_payload.img:lib64/libicui18n.so" "${OUTPUT}/lib64/"
+e2cp "${WORKDIR}/apex_payload.img:lib64/libicuuc.so" "${OUTPUT}/lib64/"
+
+e2cp "${WORKDIR}/system.img:system/apex/com.android.art.capex" "${WORKDIR}"
+unzip -od "${WORKDIR}" "${WORKDIR}/com.android.art.capex" original_apex
+unzip -od "${WORKDIR}" "${WORKDIR}/original_apex" apex_payload.img
+e2cp "${WORKDIR}/apex_payload.img:lib64/libc++.so" "${OUTPUT}/lib64/"
+
 e2cp "${WORKDIR}/system.img:system/apex/com.android.runtime.apex" "${WORKDIR}"
 unzip -od "${WORKDIR}" "${WORKDIR}/com.android.runtime.apex" apex_payload.img
-mkdir -p "${OUTPUT}/lib64"
 e2cp "${WORKDIR}/apex_payload.img:bin/linker64" "${OUTPUT}"
 chmod +x "${OUTPUT}/linker64"
 LANG=C e2ls -l "${WORKDIR}/apex_payload.img:lib64/bionic" | awk '{print $8}' | xargs -I '{}' e2cp "${WORKDIR}/apex_payload.img:lib64/bionic/{}" "${OUTPUT}/lib64/"

@@ -95,13 +95,20 @@ unless (defined $sdkver) {
 	usage("Failed to pick SDK version, try specifing it") unless defined $sdkver;
 }
 my $ndkvlibs = abs_path catfile $ndklibs, $sdkver;
+
 print $fh (<< "EOF");
 dir.wrapper=${bindir}
 
 [wrapper]
+additional.namespaces = fauxlibs
+namespace.fauxlibs.search.paths = ${ndkvlibs}
+
 namespace.default.search.paths = ${libdir}
+# for libc++_shared.so
 namespace.default.search.paths += ${ndklibs}
-namespace.default.search.paths += ${ndkvlibs}
+# beware of broken behaviour with fauxlibs
+namespace.default.links = fauxlibs
+namespace.default.link.fauxlibs.allow_all_shared_libs = true
 EOF
 
 # we fork+exec+waitpid instead of exec directly that the tempfile can be deleted afterwards
